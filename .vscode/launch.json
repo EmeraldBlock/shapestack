@@ -1,0 +1,29 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Launch Bot",
+            "type": "pwa-node",
+            "request": "launch",
+            "cwd":"${workspaceFolder}",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["start"],
+            "skipFiles": [
+                "<node_internals>/**"
+            ],
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Debug Bot",
+            "type": "pwa-node",
+            "request": "launch",
+            "cwd":"${workspaceFolder}",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["run", "dev"],
+            "skipFiles": [
+                "<node_internals>/**"
+            ],
+            "console": "integratedTerminal"
+        }
+    ]
+}
