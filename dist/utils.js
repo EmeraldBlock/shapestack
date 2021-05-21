@@ -30,6 +30,17 @@ export async function findAsync(collection, callback) {
 export async function sleep(ms) {
     return await new Promise(resolve => setTimeout(resolve, ms));
 }
+export async function safeDelete(message) {
+    try {
+        return await message.delete();
+    }
+    catch (reason) {
+        if (reason instanceof Discord.DiscordAPIError && reason.code === 10008) {
+            return message;
+        }
+        throw reason;
+    }
+}
 export function fetchGuildMessageById(id, guild) {
     const textChannelsCache = guild.channels.cache.filter((channel) => channel instanceof Discord.TextChannel);
     return Promise.any(textChannelsCache.map(channel => channel.messages.fetch(id)));

@@ -1,6 +1,6 @@
 import Discord from "discord.js";
 import { Command } from "../index.js";
-import { randInt, range, sleep, trimNewlines } from "../utils.js";
+import { randInt, range, safeDelete, sleep, trimNewlines } from "../utils.js";
 import Time from "../time.js";
 import config from "../config/config.json";
 var Suit;
@@ -206,8 +206,8 @@ class Blackjack {
         this.channel = channel;
         this.user = user;
     }
-    async display(description = "**h** to hit, **s** to stand") {
-        this.prompt = await this.channel.send(new Discord.MessageEmbed({
+    getEmbed(description = "**h** to hit, **s** to stand") {
+        return new Discord.MessageEmbed({
             color: config.colors.info,
             title: "Blackjack",
             description,
@@ -216,7 +216,15 @@ class Blackjack {
                 { name: "You", value: `${this.player}` },
             ],
             footer: { text: "See the full rules with `rules blackjack`" },
-        }));
+        });
+    }
+    async display(description) {
+        if (this.prompt === undefined || this.prompt.deleted) {
+            this.prompt = await this.channel.send(this.getEmbed(description));
+        }
+        else {
+            await this.prompt.edit(this.getEmbed(description));
+        }
     }
     async playerMove() {
         return await new Promise(resolve => {
@@ -226,18 +234,25 @@ class Blackjack {
                 const move = getMove(m.content.trim().toLowerCase());
                 if (move === Move.INVALID)
                     return false;
-                resolve(move);
+                if (m.guild?.me?.permissionsIn(this.channel).has("MANAGE_MESSAGES") ?? false) {
+                    void safeDelete(m).then(() => resolve(move));
+                }
+                else {
+                    resolve(move);
+                }
                 return true;
             }, { time: Time.MINUTE / Time.MILLI, max: 1 });
             collector.once("end", async (_, reason) => {
                 if (reason === "limit")
                     return;
-                await this.prompt.edit({ content: "Ended due to inactivity." });
+                if (this.prompt !== undefined) {
+                    await this.prompt.edit({ content: "Ended due to inactivity." });
+                }
             });
         });
     }
     async dealerMove() {
-        await sleep(Time.SECOND / Time.MILLI);
+        await sleep(1.5 * Time.SECOND / Time.MILLI);
         const { sum, soft } = this.dealer.handSum;
         if (sum < 17 || sum === 17 && soft) {
             return Move.HIT;

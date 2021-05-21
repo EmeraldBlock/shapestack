@@ -36,6 +36,17 @@ export async function sleep(ms: number): Promise<void> {
     return await new Promise(resolve => setTimeout(resolve, ms));
 }
 
+export async function safeDelete(message: Discord.Message): Promise<Discord.Message> {
+    try {
+        return await message.delete();
+    } catch (reason) {
+        if (reason instanceof Discord.DiscordAPIError && reason.code === 10008) {
+            return message;
+        }
+        throw reason;
+    }
+}
+
 export function fetchGuildMessageById(id: Discord.Snowflake, guild: Discord.Guild): Promise<Discord.Message> {
     const textChannelsCache = guild.channels.cache.filter((channel): channel is Discord.TextChannel => channel instanceof Discord.TextChannel);
     return Promise.any(textChannelsCache.map(channel => channel.messages.fetch(id)));
