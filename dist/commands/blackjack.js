@@ -137,7 +137,10 @@ class Hand {
         return new Hand([Card.fromRandom(), Card.fromRandom()]);
     }
     toString() {
-        return `**${this.blackjack() ? "BJ" : this.handSum}** ${this.cards.map(card => `\`${card}\``).join(" ")}`;
+        return `**${this.blackjack() ? "BJ" : this.handSum}** ${this.getCardsAsString()}`;
+    }
+    getCardsAsString() {
+        return this.cards.map(card => `\`${card}\``).join(" ");
     }
     hit(card = Card.fromRandom()) {
         this.cards.push(card);
@@ -180,40 +183,71 @@ class Hand {
 class Dealer extends Hand {
     constructor(cards) {
         super(cards);
-        this.handSumUp = HandSum.fromCards(this.cards.filter(card => !card.down));
+        this.hidden = true;
     }
     static deal() {
         return new Dealer([Card.fromRandom(), Card.fromRandom(true)]);
     }
     toString() {
-        return `**${this.blackjack() && !this.cards.some(card => card.down) ? "BJ" : this.handSumUp}${this.cards.some(card => card.down) ? "+" : ""}** ${this.cards.map(card => `\`${card}\``).join(" ")}`;
-    }
-    hit(card) {
-        card = super.hit(card);
-        if (!card.down) {
-            this.handSumUp.hit(card);
+        if (this.hidden) {
+            const card = this.cards[0];
+            return `**${card.rank === Rank.ACE ? `${11}s` : `${this.cards[0].value()}h`}+** ${this.getCardsAsString()}`;
         }
-        return card;
+        return super.toString();
     }
     reveal() {
+        this.hidden = false;
         this.cards[1].down = false;
-        this.handSumUp.hit(this.cards[1]);
         return this.cards[1];
     }
 }
-class Blackjack {
-    constructor(channel, user) {
-        this.channel = channel;
+class Player {
+    constructor(hands, user, game) {
+        this.hands = hands;
         this.user = user;
+        this.game = game;
+    }
+    static deal(user, game) {
+        return new Player([Hand.deal()], user, game);
+    }
+    async move() {
+        return await new Promise(resolve => {
+            const collector = this.game.channel.createMessageCollector(m => {
+                if (m.author.id !== this.user.id)
+                    return false;
+                const move = getMove(m.content.trim().toLowerCase());
+                if (move === Move.INVALID)
+                    return false;
+                if (m.guild?.me?.permissionsIn(m.channel).has("MANAGE_MESSAGES") ?? false) {
+                    void safeDelete(m).then(() => resolve(move));
+                }
+                else {
+                    resolve(move);
+                }
+                return true;
+            }, { time: Time.MINUTE / Time.MILLI, max: 1 });
+            collector.once("end", async (_, reason) => {
+                if (reason === "limit")
+                    return;
+                await this.game.prompt?.edit({ content: "Ended due to inactivity." });
+            });
+        });
+    }
+}
+class Blackjack {
+    constructor(channel, users) {
+        this.channel = channel;
+        this.users = users;
     }
     getEmbed(description = "**h** to hit, **s** to stand") {
+        const playerFields = this.players.map(player => ({ name: player.user.tag, value: player.hands.map(hand => `${hand}`).join("\n") }));
         return new Discord.MessageEmbed({
             color: config.colors.info,
             title: "Blackjack",
             description,
             fields: [
                 { name: "Dealer", value: `${this.dealer}` },
-                { name: "You", value: `${this.player}` },
+                ...playerFields,
             ],
             footer: { text: "See the full rules with `rules blackjack`" },
         });
@@ -226,31 +260,6 @@ class Blackjack {
             await this.prompt.edit(this.getEmbed(description));
         }
     }
-    async playerMove() {
-        return await new Promise(resolve => {
-            const collector = this.channel.createMessageCollector(m => {
-                if (m.author.id !== this.user.id)
-                    return false;
-                const move = getMove(m.content.trim().toLowerCase());
-                if (move === Move.INVALID)
-                    return false;
-                if (m.guild?.me?.permissionsIn(this.channel).has("MANAGE_MESSAGES") ?? false) {
-                    void safeDelete(m).then(() => resolve(move));
-                }
-                else {
-                    resolve(move);
-                }
-                return true;
-            }, { time: Time.MINUTE / Time.MILLI, max: 1 });
-            collector.once("end", async (_, reason) => {
-                if (reason === "limit")
-                    return;
-                if (this.prompt !== undefined) {
-                    await this.prompt.edit({ content: "Ended due to inactivity." });
-                }
-            });
-        });
-    }
     async dealerMove() {
         await sleep(1.5 * Time.SECOND / Time.MILLI);
         const { sum, soft } = this.dealer.handSum;
@@ -262,38 +271,40 @@ class Blackjack {
         }
     }
     async runGame() {
-        this.player = Hand.deal();
+        this.players = this.users.map(user => Player.deal(user, this));
         this.dealer = Dealer.deal();
         if (this.dealer.handSum.sum === BLACKJACK) {
             this.dealer.reveal();
             await this.display(trimNewlines(`
 **DEALER BLACKJACK**
-${this.player.handSum.sum === BLACKJACK ? "\\🟨 You tied!" : "\\🟥 You lost!"}
+${this.players[0].hands[0].handSum.sum === BLACKJACK ? "\\🟨 You tied!" : "\\🟥 You lost!"}
             `));
             return;
         }
-        await this.display();
-        player: while (true) {
-            const move = await this.playerMove();
-            switch (move) {
-                case Move.HIT: {
-                    if (this.player.handSum.sum === BLACKJACK) {
-                        await this.display("You can't hit, you've got the best sum!");
+        for (const player of this.players) {
+            await this.display();
+            player: while (true) {
+                const move = await player.move();
+                switch (move) {
+                    case Move.HIT: {
+                        if (player.hands[0].handSum.sum === BLACKJACK) {
+                            await this.display("You can't hit, you've got the best sum!");
+                            break;
+                        }
+                        const card = player.hands[0].hit();
+                        if (player.hands[0].handSum.sum > BLACKJACK) {
+                            await this.display(trimNewlines(`
+    You draw \`${card}\` and **BUST**
+    \\🟥 You lost!
+                        `));
+                            return;
+                        }
+                        await this.display(`You draw \`${card}\``);
                         break;
                     }
-                    const card = this.player.hit();
-                    if (this.player.handSum.sum > BLACKJACK) {
-                        await this.display(trimNewlines(`
-You draw \`${card}\` and **BUST**
-\\🟥 You lost!
-                    `));
-                        return;
+                    case Move.STAND: {
+                        break player;
                     }
-                    await this.display(`You draw \`${card}\``);
-                    break;
-                }
-                case Move.STAND: {
-                    break player;
                 }
             }
         }
@@ -318,7 +329,7 @@ Dealer draws \`${card}\` and **BUSTS**
                 }
             }
         }
-        switch (this.player.compare(this.dealer)) {
+        switch (this.players[0].hands[0].compare(this.dealer)) {
             case Result.LOSE: {
                 await this.display("\\🟥 You lost!");
                 break;
@@ -340,7 +351,7 @@ export default new Command({
     desc: `Starts a game of Blackjack.`,
     usage: ``,
     execute: async (message) => {
-        const game = new Blackjack(message.channel, message.author);
+        const game = new Blackjack(message.channel, [message.author, ...message.mentions.users.array()]);
         await game.runGame();
     },
 });
