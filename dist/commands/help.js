@@ -35,3 +35,4 @@ ${config.prefix}${command.name} ${command.usage}
         await message.channel.send(embed);
     },
 });
+//# sourceMappingURL=help.js.map

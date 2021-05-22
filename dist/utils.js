@@ -45,3 +45,4 @@ export function fetchGuildMessageById(id, guild) {
     const textChannelsCache = guild.channels.cache.filter((channel) => channel instanceof Discord.TextChannel);
     return Promise.any(textChannelsCache.map(channel => channel.messages.fetch(id)));
 }
+//# sourceMappingURL=utils.js.map

@@ -257,7 +257,8 @@ class Blackjack {
             this.prompt = await this.channel.send(this.getEmbed(description));
         }
         else {
-            await this.prompt.edit(this.getEmbed(description));
+            throw new Error("hi again");
+            // await this.prompt.edit(this.getEmbed(description));
         }
     }
     async dealerMove() {
@@ -355,3 +356,4 @@ export default new Command({
         await game.runGame();
     },
 });
+//# sourceMappingURL=blackjack.js.map

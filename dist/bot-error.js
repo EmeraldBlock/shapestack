@@ -13,3 +13,4 @@ export default class BotError extends Error {
             .setDescription(this.description);
     }
 }
+//# sourceMappingURL=bot-error.js.map

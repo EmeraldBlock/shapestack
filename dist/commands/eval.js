@@ -10,3 +10,4 @@ export default new Command({
         await message.channel.send(await eval(args.join(" ")), { code: true });
     },
 });
+//# sourceMappingURL=eval.js.map

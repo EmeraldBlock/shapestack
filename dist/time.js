@@ -6,3 +6,4 @@ var Time;
     Time[Time["HOUR"] = 3600000] = "HOUR";
 })(Time || (Time = {}));
 export default Time;
+//# sourceMappingURL=time.js.map
