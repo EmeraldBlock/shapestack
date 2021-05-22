@@ -142,6 +142,7 @@ class HandSum {
 
 class Hand {
     public handSum: HandSum;
+    public done: boolean = false;
 
     constructor(
         public cards: Array<Card>,
@@ -154,7 +155,7 @@ class Hand {
     }
 
     toString(): string {
-        return `**${this.blackjack() ? "BJ" : this.handSum}** ${this.getCardsAsString()}`;
+        return `**${this.bust() ? "BUST" : this.blackjack() ? "BLACKJACK" : this.handSum}** ${this.getCardsAsString()}`;
     }
 
     getCardsAsString(): string {
@@ -262,20 +263,36 @@ class Blackjack {
     public players: Array<Player>;
     public dealer: Dealer;
     public prompt: Discord.Message | undefined;
+    public currentHand: Hand | undefined;
 
     constructor(
         public channel: Discord.Message["channel"],
         public users: Array<Discord.User>,
     ) {}
 
+    getHandIcon(hand: Hand): string {
+        if (hand === this.currentHand) {
+            return "\\➡️";
+        } else if (hand.bust()) {
+            return "\\💥";
+        } else if (hand.done) {
+            return "\\🔒";
+        } else {
+            return "\\⬛";
+        }
+    }
+
     getEmbed(description: string = "**h** to hit, **s** to stand"): Discord.MessageEmbed {
-        const playerFields = this.players.map(player => ({ name: player.user.tag, value: player.hands.map(hand => `${hand}`).join("\n") }));
+        const playerFields = this.players.map(player => ({
+            name: player.user.tag,
+            value: player.hands.map(hand => `${this.getHandIcon(hand)} ${hand}`).join("\n"),
+        }));
         return new Discord.MessageEmbed({
             color: config.colors.info,
             title: "Blackjack",
             description,
             fields: [
-                { name: "Dealer", value: `${this.dealer}` },
+                { name: "Dealer", value: `${this.getHandIcon(this.dealer)} ${this.dealer}` },
                 ...playerFields,
             ],
             footer: { text: "See the full rules with `rules blackjack`" },
@@ -314,6 +331,7 @@ ${this.players[0].hands[0].handSum.sum === BLACKJACK ? "\\🟨 You tied!" : "\\�
         }
 
         for (const player of this.players) {
+            this.currentHand = player.hands[0];
             await this.display();
             player:
             while (true) {
@@ -325,12 +343,12 @@ ${this.players[0].hands[0].handSum.sum === BLACKJACK ? "\\🟨 You tied!" : "\\�
                         break;
                     }
                     const card = player.hands[0].hit();
-                    if (player.hands[0].handSum.sum > BLACKJACK) {
+                    if (player.hands[0].bust()) {
                         await this.display(trimNewlines(`
     You draw \`${card}\` and **BUST**
     \\🟥 You lost!
                         `));
-                        return;
+                        break player;
                     }
                     await this.display(`You draw \`${card}\``);
                     break;
@@ -340,8 +358,10 @@ ${this.players[0].hands[0].handSum.sum === BLACKJACK ? "\\🟨 You tied!" : "\\�
                 }
                 }
             }
+            player.hands[0].done = true;
         }
 
+        this.currentHand = this.dealer;
         await this.display(`Dealer's other card was \`${this.dealer.reveal()}\``);
         dealer:
         while (true) {
@@ -350,6 +370,8 @@ ${this.players[0].hands[0].handSum.sum === BLACKJACK ? "\\🟨 You tied!" : "\\�
             case Move.HIT: {
                 const card = this.dealer.hit();
                 if (this.dealer.handSum.sum > BLACKJACK) {
+                    this.dealer.done = true;
+                    this.currentHand = undefined;
                     await this.display(trimNewlines(`
 Dealer draws \`${card}\` and **BUSTS**
 \\🟩 You won!
@@ -364,6 +386,8 @@ Dealer draws \`${card}\` and **BUSTS**
             }
             }
         }
+        this.dealer.done = true;
+        this.currentHand = undefined;
 
         switch (this.players[0].hands[0].compare(this.dealer)) {
         case Result.LOSE: {

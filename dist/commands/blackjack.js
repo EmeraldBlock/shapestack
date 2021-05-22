@@ -131,13 +131,14 @@ class HandSum {
 class Hand {
     constructor(cards) {
         this.cards = cards;
+        this.done = false;
         this.handSum = HandSum.fromCards(this.cards);
     }
     static deal() {
         return new Hand([Card.fromRandom(), Card.fromRandom()]);
     }
     toString() {
-        return `**${this.blackjack() ? "BJ" : this.handSum}** ${this.getCardsAsString()}`;
+        return `**${this.bust() ? "BUST" : this.blackjack() ? "BLACKJACK" : this.handSum}** ${this.getCardsAsString()}`;
     }
     getCardsAsString() {
         return this.cards.map(card => `\`${card}\``).join(" ");
@@ -239,14 +240,31 @@ class Blackjack {
         this.channel = channel;
         this.users = users;
     }
+    getHandIcon(hand) {
+        if (hand === this.currentHand) {
+            return "\\➡️";
+        }
+        else if (hand.bust()) {
+            return "\\💥";
+        }
+        else if (hand.done) {
+            return "\\🔒";
+        }
+        else {
+            return "\\⬛";
+        }
+    }
     getEmbed(description = "**h** to hit, **s** to stand") {
-        const playerFields = this.players.map(player => ({ name: player.user.tag, value: player.hands.map(hand => `${hand}`).join("\n") }));
+        const playerFields = this.players.map(player => ({
+            name: player.user.tag,
+            value: player.hands.map(hand => `${this.getHandIcon(hand)} ${hand}`).join("\n"),
+        }));
         return new Discord.MessageEmbed({
             color: config.colors.info,
             title: "Blackjack",
             description,
             fields: [
-                { name: "Dealer", value: `${this.dealer}` },
+                { name: "Dealer", value: `${this.getHandIcon(this.dealer)} ${this.dealer}` },
                 ...playerFields,
             ],
             footer: { text: "See the full rules with `rules blackjack`" },
@@ -257,8 +275,7 @@ class Blackjack {
             this.prompt = await this.channel.send(this.getEmbed(description));
         }
         else {
-            throw new Error("hi again");
-            // await this.prompt.edit(this.getEmbed(description));
+            await this.prompt.edit(this.getEmbed(description));
         }
     }
     async dealerMove() {
@@ -283,6 +300,7 @@ ${this.players[0].hands[0].handSum.sum === BLACKJACK ? "\\🟨 You tied!" : "\\�
             return;
         }
         for (const player of this.players) {
+            this.currentHand = player.hands[0];
             await this.display();
             player: while (true) {
                 const move = await player.move();
@@ -293,12 +311,12 @@ ${this.players[0].hands[0].handSum.sum === BLACKJACK ? "\\🟨 You tied!" : "\\�
                             break;
                         }
                         const card = player.hands[0].hit();
-                        if (player.hands[0].handSum.sum > BLACKJACK) {
+                        if (player.hands[0].bust()) {
                             await this.display(trimNewlines(`
     You draw \`${card}\` and **BUST**
     \\🟥 You lost!
                         `));
-                            return;
+                            break player;
                         }
                         await this.display(`You draw \`${card}\``);
                         break;
@@ -308,7 +326,9 @@ ${this.players[0].hands[0].handSum.sum === BLACKJACK ? "\\🟨 You tied!" : "\\�
                     }
                 }
             }
+            player.hands[0].done = true;
         }
+        this.currentHand = this.dealer;
         await this.display(`Dealer's other card was \`${this.dealer.reveal()}\``);
         dealer: while (true) {
             const move = await this.dealerMove();
@@ -316,6 +336,8 @@ ${this.players[0].hands[0].handSum.sum === BLACKJACK ? "\\🟨 You tied!" : "\\�
                 case Move.HIT: {
                     const card = this.dealer.hit();
                     if (this.dealer.handSum.sum > BLACKJACK) {
+                        this.dealer.done = true;
+                        this.currentHand = undefined;
                         await this.display(trimNewlines(`
 Dealer draws \`${card}\` and **BUSTS**
 \\🟩 You won!
@@ -330,6 +352,8 @@ Dealer draws \`${card}\` and **BUSTS**
                 }
             }
         }
+        this.dealer.done = true;
+        this.currentHand = undefined;
         switch (this.players[0].hands[0].compare(this.dealer)) {
             case Result.LOSE: {
                 await this.display("\\🟥 You lost!");
