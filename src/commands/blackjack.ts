@@ -44,12 +44,15 @@ const rankToString = [
     "K",
 ];
 
-const BLACKJACK = 21;
+const PERFECT = 21;
 
 enum Move {
     INVALID,
     HIT,
     STAND,
+    DOUBLE,
+    SPLIT,
+    SURRENDER,
 }
 
 function getMove(content: string): Move {
@@ -62,6 +65,19 @@ function getMove(content: string): Move {
     case "stand": {
         return Move.STAND;
     }
+    case "d":
+    case "double":
+    case "double down": {
+        return Move.DOUBLE;
+    }
+    case "p":
+    case "split": {
+        return Move.SPLIT;
+    }
+    case "r":
+    case "surrender": {
+        return Move.SURRENDER;
+    }
     default: {
         return Move.INVALID;
     }
@@ -73,6 +89,25 @@ enum Result {
     TIE,
     WIN,
 }
+
+enum Status {
+    BLACKJACK,
+    WAIT,
+    CURRENT,
+    SURRENDER,
+    BUST,
+    STAND,
+    DOUBLE,
+}
+const statusToEmoji = [
+    "✨",
+    "⬛",
+    "➡️",
+    "🏳️",
+    "💥",
+    "🔒",
+    "💵",
+];
 
 class Card {
     constructor(
@@ -111,7 +146,7 @@ class HandSum {
     static fromCards(cards: Array<Card>): HandSum {
         const rawSum = cards.reduce((sum, card) => sum + card.value(), 0);
         if (cards.some(card => card.rank === Rank.ACE)) {
-            const soft = rawSum+10 <= BLACKJACK;
+            const soft = rawSum+10 <= PERFECT;
             return new HandSum(soft ? rawSum+10 : rawSum, soft);
         } else {
             return new HandSum(rawSum, false);
@@ -123,31 +158,32 @@ class HandSum {
     }
 
     hit(card: Card): void {
-        if (card.rank === Rank.ACE && this.sum+11 <= BLACKJACK) {
+        if (card.rank === Rank.ACE && this.sum+11 <= PERFECT) {
             this.sum += 11;
             this.soft = true;
         } else {
             this.sum += card.value();
         }
-        if (this.soft && this.sum > BLACKJACK) {
+        if (this.soft && this.sum > PERFECT) {
             this.sum -= 10;
             this.soft = false;
         }
     }
 
     bust(): boolean {
-        return this.sum > BLACKJACK;
+        return this.sum > PERFECT;
     }
 }
 
 class Hand {
     public handSum: HandSum;
-    public done: boolean = false;
+    public status: Status;
 
     constructor(
         public cards: Array<Card>,
     ) {
         this.handSum = HandSum.fromCards(this.cards);
+        this.status = this.blackjack() ? Status.BLACKJACK : Status.WAIT;
     }
 
     static deal(): Hand {
@@ -173,7 +209,7 @@ class Hand {
     }
 
     blackjack(): boolean {
-        return this.handSum.sum === BLACKJACK && this.cards.length <= 2;
+        return this.handSum.sum === PERFECT && this.cards.length <= 2;
     }
 
     compare(hand: Hand) {
@@ -184,7 +220,7 @@ class Hand {
         } else if (ourSum < theirSum) {
             return Result.LOSE;
         } else {
-            if (ourSum !== BLACKJACK) {
+            if (ourSum !== PERFECT) {
                 return Result.TIE;
             }
             const ourBJ = this.cards.length <= 2;
@@ -262,37 +298,25 @@ class Player {
 class Blackjack {
     public players: Array<Player>;
     public dealer: Dealer;
+    public embed: Discord.MessageEmbed;
     public prompt: Discord.Message | undefined;
-    public currentHand: Hand | undefined;
 
     constructor(
         public channel: Discord.Message["channel"],
         public users: Array<Discord.User>,
     ) {}
 
-    getHandIcon(hand: Hand): string {
-        if (hand === this.currentHand) {
-            return "\\➡️";
-        } else if (hand.bust()) {
-            return "\\💥";
-        } else if (hand.done) {
-            return "\\🔒";
-        } else {
-            return "\\⬛";
-        }
-    }
-
-    getEmbed(description: string = "**h** to hit, **s** to stand"): Discord.MessageEmbed {
+    getEmbed(description: string = "**h**it, **s**tand, **d**ouble down, s**p**lit, or su**r**render"): Discord.MessageEmbed {
         const playerFields = this.players.map(player => ({
             name: player.user.tag,
-            value: player.hands.map(hand => `${this.getHandIcon(hand)} ${hand}`).join("\n"),
+            value: player.hands.map(hand => `${statusToEmoji[hand.status]} ${hand}`).join("\n"),
         }));
         return new Discord.MessageEmbed({
             color: config.colors.info,
             title: "Blackjack",
             description,
             fields: [
-                { name: "Dealer", value: `${this.getHandIcon(this.dealer)} ${this.dealer}` },
+                { name: "Dealer", value: `${statusToEmoji[this.dealer.status]} ${this.dealer}` },
                 ...playerFields,
             ],
             footer: { text: "See the full rules with `rules blackjack`" },
@@ -321,47 +345,87 @@ class Blackjack {
         this.players = this.users.map(user => Player.deal(user, this));
         this.dealer = Dealer.deal();
 
-        if (this.dealer.handSum.sum === BLACKJACK) {
+        if (this.dealer.handSum.sum === PERFECT) {
             this.dealer.reveal();
             await this.display(trimNewlines(`
 **DEALER BLACKJACK**
-${this.players[0].hands[0].handSum.sum === BLACKJACK ? "\\🟨 You tied!" : "\\🟥 You lost!"}
+${this.players[0].hands[0].handSum.sum === PERFECT ? "🟨 You tied!" : "🟥 You lost!"}
             `));
             return;
         }
 
         for (const player of this.players) {
-            this.currentHand = player.hands[0];
             await this.display();
-            player:
-            while (true) {
-                const move = await player.move();
-                switch (move) {
-                case Move.HIT: {
-                    if (player.hands[0].handSum.sum === BLACKJACK) {
-                        await this.display("You can't hit, you've got the best sum!");
+            for (let h = 0; h < player.hands.length; ++h) {
+                const hand = player.hands[h];
+                hand.status = Status.CURRENT;
+                hand:
+                while (true) {
+                    const move = await player.move();
+                    if (hand.handSum.sum === PERFECT && move !== Move.STAND) {
+                        await this.display("You can't do that, you've got the best sum!");
+                        continue;
+                    }
+                    switch (move) {
+                    case Move.HIT: {
+                        const card = hand.hit();
+                        if (hand.bust()) {
+                            await this.display(trimNewlines(`
+You draw \`${card}\` and **BUST**
+🟥 You lost!
+                            `));
+                            break hand;
+                        }
+                        await this.display(`You draw \`${card}\``);
                         break;
                     }
-                    const card = player.hands[0].hit();
-                    if (player.hands[0].bust()) {
-                        await this.display(trimNewlines(`
-    You draw \`${card}\` and **BUST**
-    \\🟥 You lost!
-                        `));
-                        break player;
+                    case Move.STAND: {
+                        hand.status = Status.STAND;
+                        break hand;
                     }
-                    await this.display(`You draw \`${card}\``);
-                    break;
-                }
-                case Move.STAND: {
-                    break player;
-                }
+                    case Move.DOUBLE: {
+                        const card = hand.hit();
+                        if (hand.bust()) {
+                            await this.display(trimNewlines(`
+You double down and draw \`${card}\` and **BUST**
+🟥 You lost!
+                            `));
+                            break hand;
+                        }
+                        hand.status = Status.SURRENDER;
+                        await this.display(`You double down and draw \`${card}\``);
+                        break hand;
+                    }
+                    case Move.SPLIT: {
+                        if (hand.cards.length > 2) {
+                            await this.display("You can only split on the first turn of your hand!");
+                            break;
+                        }
+                        if (hand.cards[0].value() !== hand.cards[1].value()) {
+                            await this.display("You can only split if your cards have the same value!");
+                            break;
+                        }
+                        player.hands.splice(h+1, 0, new Hand([hand.cards.pop()!]));
+                        hand.handSum = HandSum.fromCards(hand.cards);
+                        await this.display(`You split your hand and draw \`${hand.hit()}\` and \`${player.hands[h+1].hit()}\``);
+                        break;
+                    }
+                    case Move.SURRENDER: {
+                        if (hand.cards.length > 2) {
+                            await this.display("You can only surrender on the first turn of your hand!");
+                            break;
+                        }
+                        hand.status = Status.SURRENDER;
+                        await this.display(`You surrender your hand`);
+                        break hand;
+                    }
+                    }
                 }
             }
-            player.hands[0].done = true;
         }
 
-        this.currentHand = this.dealer;
+        this.dealer.status = Status.CURRENT;
+        await sleep(1.5 * Time.SECOND / Time.MILLI);
         await this.display(`Dealer's other card was \`${this.dealer.reveal()}\``);
         dealer:
         while (true) {
@@ -369,12 +433,11 @@ ${this.players[0].hands[0].handSum.sum === BLACKJACK ? "\\🟨 You tied!" : "\\�
             switch (move) {
             case Move.HIT: {
                 const card = this.dealer.hit();
-                if (this.dealer.handSum.sum > BLACKJACK) {
-                    this.dealer.done = true;
-                    this.currentHand = undefined;
+                if (this.dealer.handSum.sum > PERFECT) {
+                    this.dealer.status = Status.BUST;
                     await this.display(trimNewlines(`
 Dealer draws \`${card}\` and **BUSTS**
-\\🟩 You won!
+🟩 You won!
                     `));
                     return;
                 }
@@ -382,24 +445,23 @@ Dealer draws \`${card}\` and **BUSTS**
                 break;
             }
             case Move.STAND: {
+                this.dealer.status = Status.STAND;
                 break dealer;
             }
             }
         }
-        this.dealer.done = true;
-        this.currentHand = undefined;
 
         switch (this.players[0].hands[0].compare(this.dealer)) {
         case Result.LOSE: {
-            await this.display("\\🟥 You lost!");
+            await this.display("🟥 You lost!");
             break;
         }
         case Result.TIE: {
-            await this.display("\\🟨 You tied!");
+            await this.display("🟨 You tied!");
             break;
         }
         case Result.WIN: {
-            await this.display("\\🟩 You won!");
+            await this.display("🟩 You won!");
             break;
         }
         }

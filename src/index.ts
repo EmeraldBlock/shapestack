@@ -69,10 +69,9 @@ async function runBot() {
             return;
         }
 
-        const args = message.content.slice(config.prefix.length).split(" ");
-        const name = args.shift();
+        const args = message.content.slice(config.prefix.length).split(/ +/);
+        const name = args.shift()!;
 
-        assert.notEqual(name, undefined);
         const command = data.commands.get(name) ?? data.commands.find(cmd => cmd.alias !== undefined && cmd.alias.includes(name));
         try {
             if (command === undefined) {

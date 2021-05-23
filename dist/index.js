@@ -44,9 +44,8 @@ async function runBot() {
             await message.channel.send("Sorry, I don't support DMs yet!");
             return;
         }
-        const args = message.content.slice(config.prefix.length).split(" ");
+        const args = message.content.slice(config.prefix.length).split(/ +/);
         const name = args.shift();
-        assert.notEqual(name, undefined);
         const command = data.commands.get(name) ?? data.commands.find(cmd => cmd.alias !== undefined && cmd.alias.includes(name));
         try {
             if (command === undefined) {
