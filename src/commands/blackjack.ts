@@ -1,10 +1,11 @@
 import Discord from "discord.js";
 
 import { Command } from "../index.js";
-import { randInt, range, safeDelete, sleep, trimNewlines } from "../utils.js";
+import { randInt, range, safeDelete, sleep, toEnglishList, trimNewlines } from "../utils.js";
 import Time from "../time.js";
 
 import config from "../config/config.json";
+import BotError from "../bot-error.js";
 
 enum Suit {
     CLUBS,
@@ -302,7 +303,7 @@ class Blackjack {
     public prompt: Discord.Message | undefined;
 
     constructor(
-        public channel: Discord.Message["channel"],
+        public channel: Discord.MessageChannel,
         public users: Array<Discord.User>,
     ) {}
 
@@ -468,6 +469,8 @@ Dealer draws \`${card}\` and **BUSTS**
     }
 }
 
+const channels = new Map<Discord.Snowflake, Set<Discord.Snowflake>>();
+
 export default new Command({
     name: "blackjack",
     alias: ["bj"],
@@ -476,7 +479,27 @@ export default new Command({
     usage:
 ``,
     execute: async message => {
-        const game = new Blackjack(message.channel, [message.author, ...message.mentions.users.array()]);
+        const playerUsers = [message.author, ...message.mentions.users.array()];
+
+        const playerIds = playerUsers.map(user => user.id);
+        const currentIds = channels.get(message.channel.id) ?? new Set<Discord.Snowflake>();
+        if (currentIds.size > 0 && playerIds.some(id => currentIds.has(id))) {
+            const conflictIds = playerIds.filter(id => currentIds.has(id));
+
+            const list = toEnglishList(conflictIds.map(id => id === message.author.id ? "You" : `<@${id}>`))!;
+            const verb = conflictIds[0] !== message.author.id && conflictIds.length === 1 ? "is" : "are";
+            throw new BotError("Already playing", `${list} ${verb} already playing Blackjack in this channel!`);
+        }
+        channels.set(message.channel.id, new Set([...currentIds, ...playerIds]));
+
+        const game = new Blackjack(message.channel, playerUsers);
         await game.runGame();
+
+        const ids = channels.get(message.channel.id)!;
+        if (playerIds.length === ids.size) {
+            channels.delete(message.channel.id);
+        } else {
+            playerIds.forEach(id => ids.delete(id));
+        }
     },
 });

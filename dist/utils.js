@@ -30,6 +30,22 @@ export async function findAsync(collection, callback) {
 export async function sleep(ms) {
     return await new Promise(resolve => setTimeout(resolve, ms));
 }
+export function toEnglishList(array) {
+    switch (array.length) {
+        case 0: {
+            return undefined;
+        }
+        case 1: {
+            return array[0];
+        }
+        case 2: {
+            return `${array[0]} and ${array[1]}`;
+        }
+        default: {
+            return `${array.slice(0, -1).join(", ")}, and ${array[-1]}`;
+        }
+    }
+}
 export async function safeDelete(message) {
     try {
         return await message.delete();

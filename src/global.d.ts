@@ -34,4 +34,6 @@ declare module "discord.js" {
 
     // specifies parameter types of filters for MessageCollectors
     type MessageCollectorFilter = (message: Message, collection: MessageCollector["collected"]) => boolean | Promise<boolean>;
+
+    type MessageChannel = Message["channel"];
 }
