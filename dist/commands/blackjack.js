@@ -3,7 +3,7 @@ import { Command } from "../index.js";
 import { randInt, range, safeDelete, sleep, toEnglishList, trimNewlines } from "../utils.js";
 import Time from "../time.js";
 import config from "../config/config.json";
-import BotError from "../bot-error.js";
+import { BotError, AggregateBotError } from "../errors.js";
 var Suit;
 (function (Suit) {
     Suit[Suit["CLUBS"] = 0] = "CLUBS";
@@ -347,14 +347,13 @@ ${next}${rules ? `
             return;
         }
         this.prev = "Dealer did not have blackjack";
-        for (let p = 0; p < this.players.length; ++p) {
-            const player = this.players[p];
+        for (const player of this.players) {
             const mention = player.user.toString();
-            player: for (let h = 0; h < player.hands.length; ++h) {
+            for (let h = 0; h < player.hands.length; ++h) {
                 const hand = player.hands[h];
                 hand.status = Status.CURRENT;
                 hand: while (true) {
-                    await this.displayEmbed(`${mention}'s turn...`, true);
+                    await this.displayEmbed(`${mention} to move...`, true);
                     const move = await player.move();
                     if (hand.handSum.sum === PERFECT && move !== Move.STAND) {
                         this.prev = "You can't do that, you've got the best sum!";
@@ -365,27 +364,27 @@ ${next}${rules ? `
                             const card = hand.hit();
                             if (hand.bust()) {
                                 hand.status = Status.BUST;
-                                this.prev = `You draw \`${card}\` and **BUST**`;
+                                this.prev = `${mention} draws \`${card}\` and **BUSTS**.`;
                                 await this.displayResult(Result.LOSE);
                                 break hand;
                             }
-                            this.prev = `You draw \`${card}\``;
+                            this.prev = `${mention} draws \`${card}\`.`;
                             break;
                         }
                         case Move.STAND: {
                             hand.status = Status.STAND;
-                            this.prev = `You stand`;
+                            this.prev = `${mention} stands.`;
                             break hand;
                         }
                         case Move.DOUBLE: {
                             const card = hand.hit();
                             if (hand.bust()) {
                                 hand.status = Status.BUST;
-                                this.prev = `You double down and draw \`${card}\` and **BUST**`;
+                                this.prev = `${mention} doubles down and draws \`${card}\` and **BUSTS**.`;
                                 break hand;
                             }
                             hand.status = Status.DOUBLE;
-                            this.prev = `You double down and draw \`${card}\``;
+                            this.prev = `${mention} doubles down and draws \`${card}\`.`;
                             break hand;
                         }
                         case Move.SPLIT: {
@@ -399,7 +398,7 @@ ${next}${rules ? `
                             }
                             player.hands.splice(h + 1, 0, new Hand([hand.cards.pop()]));
                             hand.handSum = HandSum.fromCards(hand.cards);
-                            this.prev = `You split your hand and draw \`${hand.hit()}\` and \`${player.hands[h + 1].hit()}\``;
+                            this.prev = `${mention} splits their hand and draws \`${hand.hit()}\` and \`${player.hands[h + 1].hit()}\`.`;
                             break;
                         }
                         case Move.SURRENDER: {
@@ -408,14 +407,15 @@ ${next}${rules ? `
                                 break;
                             }
                             hand.status = Status.SURRENDER;
-                            this.prev = `You surrender your hand`;
+                            this.prev = `${mention} surrenders their hand.`;
                             break hand;
                         }
                         case Move.TIMEOUT: {
-                            this.players.splice(p, 1);
-                            this.prev = "You have been kicked out due to inactivity";
-                            --p;
-                            break player;
+                            for (; h < player.hands.length; ++h) {
+                                player.hands[h].status = Status.STAND;
+                            }
+                            this.prev = `${mention} has been skipped due to inactivity.`;
+                            break hand;
                         }
                     }
                 }
@@ -424,7 +424,7 @@ ${next}${rules ? `
         this.dealer.status = Status.CURRENT;
         await this.displayEmbed(`Dealer to reveal card...`, false);
         await sleep(1.5 * Time.SECOND / Time.MILLI);
-        this.prev = `Dealer's other card was \`${this.dealer.reveal()}\``;
+        this.prev = `Dealer's other card was \`${this.dealer.reveal()}\`.`;
         dealer: while (true) {
             await this.displayEmbed(`Dealer to move...`, false);
             const move = await this.dealerMove();
@@ -433,15 +433,15 @@ ${next}${rules ? `
                     const card = this.dealer.hit();
                     if (this.dealer.handSum.sum > PERFECT) {
                         this.dealer.status = Status.BUST;
-                        this.prev = `Dealer draws \`${card}\` and **BUSTS**`;
-                        break;
+                        this.prev = `Dealer draws \`${card}\` and **BUSTS**.`;
+                        break dealer;
                     }
-                    this.prev = `Dealer draws \`${card}\``;
+                    this.prev = `Dealer draws \`${card}\`.`;
                     break;
                 }
                 case Move.STAND: {
                     this.dealer.status = Status.STAND;
-                    this.prev = `Dealer stands`;
+                    this.prev = `Dealer stands.`;
                     break dealer;
                 }
             }
@@ -457,13 +457,26 @@ export default new Command({
     usage: ``,
     execute: async (message) => {
         const playerUsers = [message.author, ...message.mentions.users.array()];
+        const botErrors = [];
+        if (playerUsers.some(user => user.id === message.client.user.id)) {
+            botErrors.push(new BotError("No AI support", "I don't know how to play Blackjack!"));
+        }
+        const playerBots = playerUsers.filter(user => user.bot && user.id !== message.client.user.id);
+        if (playerBots.length > 0) {
+            const list = toEnglishList(playerBots.map(user => user.toString()));
+            const predicate = playerBots.length === 1 ? "is a bot" : "are bots";
+            botErrors.push(new BotError("Bots not allowed", `${list} ${predicate}!`));
+        }
         const playerIds = playerUsers.map(user => user.id);
         const currentIds = channels.get(message.channel.id) ?? new Set();
         if (currentIds.size > 0 && playerIds.some(id => currentIds.has(id))) {
             const conflictIds = playerIds.filter(id => currentIds.has(id));
             const list = toEnglishList(conflictIds.map(id => id === message.author.id ? "You" : `<@${id}>`));
             const verb = conflictIds[0] !== message.author.id && conflictIds.length === 1 ? "is" : "are";
-            throw new BotError("Already playing", `${list} ${verb} already playing Blackjack in this channel!`);
+            botErrors.push(new BotError("Already playing", `${list} ${verb} already playing Blackjack in this channel!`));
+        }
+        if (botErrors.length > 0) {
+            throw AggregateBotError.fromBotErrors(botErrors);
         }
         channels.set(message.channel.id, new Set([...currentIds, ...playerIds]));
         const game = new Blackjack(message.channel, playerUsers);

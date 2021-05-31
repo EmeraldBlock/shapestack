@@ -1,6 +1,6 @@
 import Discord from "discord.js";
 import { Command } from "../index.js";
-import BotError from "../bot-error.js";
+import { BotError } from "../errors.js";
 import config from "../config/config.json";
 export default new Command({
     name: "help",

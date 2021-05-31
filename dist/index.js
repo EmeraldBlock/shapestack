@@ -4,7 +4,7 @@ import { fileURLToPath } from "url";
 import assert from "assert/strict";
 import Discord, { DMChannel } from "discord.js";
 import chalk from "chalk";
-import BotError from "./bot-error.js";
+import { BotError, AggregateBotError } from "./errors.js";
 import config from "./config/config.json";
 import secrets from "./config/secrets.json";
 const __filename = fileURLToPath(import.meta.url);
@@ -57,7 +57,7 @@ async function runBot() {
             await command.execute(message, args, data);
         }
         catch (err) {
-            if (err instanceof BotError) {
+            if (err instanceof BotError || err instanceof AggregateBotError) {
                 await message.channel.send(err.getEmbed());
             }
             else if (err instanceof Error) {
