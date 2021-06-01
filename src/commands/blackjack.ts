@@ -453,7 +453,7 @@ ${next}${rules ? `
                 while (true) {
                     await this.displayEmbed(`${mention} to move...`, true);
                     const move = await player.move();
-                    if (hand.handSum.sum === PERFECT && [Move.STAND, Move.QUIT, Move.TIMEOUT].includes(move)) {
+                    if (hand.handSum.sum === PERFECT && ![Move.STAND, Move.QUIT, Move.TIMEOUT].includes(move)) {
                         this.prev = "You can't do that, you've got the best sum!";
                         continue;
                     }
