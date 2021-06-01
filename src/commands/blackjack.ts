@@ -50,6 +50,7 @@ const PERFECT = 21;
 enum Move {
     INVALID,
     TIMEOUT,
+    QUIT,
     HIT,
     STAND,
     DOUBLE,
@@ -80,6 +81,10 @@ function getMove(content: string): Move {
     case "surrender": {
         return Move.SURRENDER;
     }
+    case "q":
+    case "quit": {
+        return Move.QUIT;
+    }
     default: {
         return Move.INVALID;
     }
@@ -91,29 +96,30 @@ enum Result {
     TIE,
     WIN,
 }
-const resultToDisplay = [
-    "🟥 You lost!",
-    "🟨 You tied!",
-    "🟩 You won!",
+const resultToEmoji = [
+    "🟥",
+    "🟨",
+    "🟩",
+];
+const resultToMultiplier = [
+    -1,
+    0,
+    1,
 ];
 
 enum Status {
-    BLACKJACK,
     WAIT,
     CURRENT,
     SURRENDER,
     BUST,
     STAND,
-    DOUBLE,
 }
 const statusToEmoji = [
-    "✨",
     "⬛",
     "➡️",
     "🏳️",
     "💥",
     "🔒",
-    "💵",
 ];
 
 class Card {
@@ -184,17 +190,16 @@ class HandSum {
 
 class Hand {
     public handSum: HandSum;
-    public status: Status;
+    public status: Status = Status.WAIT;
 
     constructor(
         public cards: Array<Card>,
     ) {
         this.handSum = HandSum.fromCards(this.cards);
-        this.status = this.blackjack() ? Status.BLACKJACK : Status.WAIT;
     }
 
-    static deal(): Hand {
-        return new Hand([Card.fromRandom(), Card.fromRandom()]);
+    static deal<T extends typeof Hand>(this: T): InstanceType<T> {
+        return new this([Card.fromRandom(), Card.fromRandom()]) as InstanceType<T>;
     }
 
     toString(): string {
@@ -220,6 +225,9 @@ class Hand {
     }
 
     compare(hand: Hand) {
+        if (hand.bust()) {
+            return Result.WIN;
+        }
         const ourSum = this.handSum.sum;
         const theirSum = hand.handSum.sum;
         if (ourSum > theirSum) {
@@ -251,8 +259,8 @@ class Dealer extends Hand {
         this.status = Status.WAIT;
     }
 
-    static deal(): Dealer {
-        return new Dealer([Card.fromRandom(), Card.fromRandom(true)]);
+    static<T extends typeof Dealer>(this: T): InstanceType<T> {
+        return new this([Card.fromRandom(), Card.fromRandom(true)]) as InstanceType<T>;
     }
 
     toString(): string {
@@ -266,27 +274,65 @@ class Dealer extends Hand {
     reveal(): Card {
         this.hidden = false;
         this.cards[1].down = false;
-        if (this.blackjack()) {
-            this.status = Status.BLACKJACK;
-        }
         return this.cards[1];
     }
 }
 
+class PlayerHand extends Hand {
+    public bet: number = 100;
+    public result?: Result;
+
+    constructor(cards: Array<Card>) {
+        super(cards);
+    }
+
+    resolve(hand: Hand): Result {
+        return this.result ?? (this.result = this.compare(hand));
+    }
+
+    betToString(): string {
+        switch (this.result) {
+        case Result.LOSE: {
+            return `**-${this.bet}**`;
+        }
+        case Result.TIE: {
+            return `**~~${this.bet}~~**`;
+        }
+        case Result.WIN: {
+            return `**+${this.bet}**`;
+        }
+        default: {
+            return `_${this.bet}_`;
+        }
+        }
+    }
+
+    toString(): string {
+        return `${super.toString()} ${this.betToString()}`;
+    }
+}
+
 class Player {
+    public quit: boolean = false;
+
     constructor(
-        public hands: Array<Hand>,
+        public hands: Array<PlayerHand>,
         public user: Discord.User,
-        public game: Blackjack,
+        public channel: Discord.MessageChannel,
     ) {}
 
-    static deal(user: Discord.User, game: Blackjack): Player {
-        return new Player([Hand.deal()], user, game);
+    static deal(user: Discord.User, channel: Discord.MessageChannel): Player {
+        return new Player([PlayerHand.deal()], user, channel);
+    }
+
+    quitGame(): void {
+        this.quit = true;
+        active.get(this.channel.id)!.delete(this.user.id);
     }
 
     async move(): Promise<Move> {
         return await new Promise<Move>(resolve => {
-            const collector = this.game.channel.createMessageCollector(m => {
+            const collector = this.channel.createMessageCollector(m => {
                 if (m.author.id !== this.user.id) return false;
                 const move = getMove(m.content.trim().toLowerCase());
                 if (move === Move.INVALID) return false;
@@ -310,13 +356,21 @@ class Blackjack {
     public players: Array<Player>;
     public dealer: Dealer;
     public embed: Discord.MessageEmbed;
-    public prompt: Discord.Message | undefined;
+    public prompt?: Discord.Message;
     public prev: string;
 
     constructor(
         public channel: Discord.MessageChannel,
         public users: Array<Discord.User>,
     ) {}
+
+    resolveAll(): void {
+        this.players.forEach(player => player.hands.forEach(hand => hand.resolve(this.dealer)));
+    }
+
+    getUserIds(): Array<Discord.Snowflake> {
+        return this.players.filter(player => !player.quit).map(player => player.user.id);
+    }
 
     getEmbed(next: string, rules: boolean): Discord.MessageEmbed {
         return new Discord.MessageEmbed({
@@ -330,8 +384,16 @@ ${next}${rules ? `
             fields: [
                 { name: "Dealer", value: `${statusToEmoji[this.dealer.status]} ${this.dealer}` },
                 ...this.players.map(player => ({
-                    name: player.user.tag,
-                    value: player.hands.map(hand => `${statusToEmoji[hand.status]} ${hand}`).join("\n"),
+                    name: `${player.quit ? `~~${player.user.tag}~~` : player.user.tag} (*${
+                        player.hands.filter(hand => hand.result === undefined).reduce((sum, hand) => sum + hand.bet, 0)
+                    }* , **${
+                        player.hands.filter(hand => hand.result !== undefined).reduce((sum, hand) => sum + hand.bet * resultToMultiplier[hand.result!], 0)
+                    }**)`,
+                    value: player.hands.map(hand => `${
+                        hand.result !== undefined && hand.status === Status.STAND
+                            ? resultToEmoji[hand.result]
+                            : statusToEmoji[hand.status]
+                    } ${hand}`).join("\n"),
                 })),
             ],
             footer: { text: "See the full rules with `rules blackjack`" },
@@ -350,10 +412,6 @@ ${next}${rules ? `
         await this.display(this.getEmbed(next, rules));
     }
 
-    async displayResult(result: Result): Promise<void> {
-        await this.displayEmbed(resultToDisplay[result], false);
-    }
-
     async delay(): Promise<void> {
         await sleep(1.5 * Time.SECOND / Time.MILLI);
     }
@@ -369,23 +427,22 @@ ${next}${rules ? `
     }
 
     async runGame(): Promise<void> {
-        this.players = this.users.map(user => Player.deal(user, this));
+        this.players = this.users.map(user => Player.deal(user, this.channel));
         this.dealer = Dealer.deal();
-        this.prev = "Hands are dealt";
-
-        await this.displayEmbed("Dealer to peek at card...", false);
-        await this.delay();
-        if (this.dealer.handSum.sum === PERFECT) {
-            this.dealer.reveal();
-            this.prev = "**DEALER BLACKJACK**";
-            await this.displayResult(
-                this.players[0].hands[0].handSum.sum === PERFECT
-                    ? Result.TIE
-                    : Result.LOSE,
-            );
-            return;
+        this.prev = "Hands dealt.";
+        if (this.dealer.cards[0].value() === 10 || this.dealer.cards[0].rank === Rank.ACE) {
+            await this.displayEmbed("Dealer to peek at card...", false);
+            await this.delay();
+            if (this.dealer.handSum.sum === PERFECT) {
+                this.dealer.reveal();
+                this.prev = "**DEALER BLACKJACK**";
+                this.resolveAll();
+                await this.displayEmbed("Game end!", false);
+                return;
+            }
+            this.prev = "Dealer did not have a blackjack.";
         }
-        this.prev = "Dealer did not have blackjack";
+
 
         for (const player of this.players) {
             const mention = player.user.toString();
@@ -396,7 +453,7 @@ ${next}${rules ? `
                 while (true) {
                     await this.displayEmbed(`${mention} to move...`, true);
                     const move = await player.move();
-                    if (hand.handSum.sum === PERFECT && move !== Move.STAND) {
+                    if (hand.handSum.sum === PERFECT && [Move.STAND, Move.QUIT, Move.TIMEOUT].includes(move)) {
                         this.prev = "You can't do that, you've got the best sum!";
                         continue;
                     }
@@ -406,7 +463,7 @@ ${next}${rules ? `
                         if (hand.bust()) {
                             hand.status = Status.BUST;
                             this.prev = `${mention} draws \`${card}\` and **BUSTS**.`;
-                            await this.displayResult(Result.LOSE);
+                            hand.result = Result.LOSE;
                             break hand;
                         }
                         this.prev = `${mention} draws \`${card}\`.`;
@@ -418,13 +475,15 @@ ${next}${rules ? `
                         break hand;
                     }
                     case Move.DOUBLE: {
+                        hand.bet *= 2;
                         const card = hand.hit();
                         if (hand.bust()) {
                             hand.status = Status.BUST;
                             this.prev = `${mention} doubles down and draws \`${card}\` and **BUSTS**.`;
+                            hand.result = Result.LOSE;
                             break hand;
                         }
-                        hand.status = Status.DOUBLE;
+                        hand.status = Status.STAND;
                         this.prev = `${mention} doubles down and draws \`${card}\`.`;
                         break hand;
                     }
@@ -437,7 +496,7 @@ ${next}${rules ? `
                             this.prev = "You can only split if your cards have the same value!";
                             break;
                         }
-                        player.hands.splice(h+1, 0, new Hand([hand.cards.pop()!]));
+                        player.hands.splice(h+1, 0, new PlayerHand([hand.cards.pop()!]));
                         hand.handSum = HandSum.fromCards(hand.cards);
                         this.prev = `${mention} splits their hand and draws \`${hand.hit()}\` and \`${player.hands[h+1].hit()}\`.`;
                         break;
@@ -447,14 +506,25 @@ ${next}${rules ? `
                             this.prev = "You can only surrender on the first turn of your hand!";
                             break;
                         }
+                        hand.bet /= 2;
                         hand.status = Status.SURRENDER;
+                        hand.result = Result.LOSE;
                         this.prev = `${mention} surrenders their hand.`;
+                        break hand;
+                    }
+                    case Move.QUIT: {
+                        for (; h < player.hands.length; ++h) {
+                            player.hands[h].status = Status.STAND;
+                        }
+                        player.quitGame();
+                        this.prev = `${mention} has quit.`;
                         break hand;
                     }
                     case Move.TIMEOUT: {
                         for (; h < player.hands.length; ++h) {
                             player.hands[h].status = Status.STAND;
                         }
+                        player.quitGame();
                         this.prev = `${mention} has been skipped due to inactivity.`;
                         break hand;
                     }
@@ -467,34 +537,40 @@ ${next}${rules ? `
         await this.displayEmbed(`Dealer to reveal card...`, false);
         await sleep(1.5 * Time.SECOND / Time.MILLI);
         this.prev = `Dealer's other card was \`${this.dealer.reveal()}\`.`;
-        dealer:
-        while (true) {
-            await this.displayEmbed(`Dealer to move...`, false);
-            const move = await this.dealerMove();
-            switch (move) {
-            case Move.HIT: {
-                const card = this.dealer.hit();
-                if (this.dealer.handSum.sum > PERFECT) {
-                    this.dealer.status = Status.BUST;
-                    this.prev = `Dealer draws \`${card}\` and **BUSTS**.`;
+
+        if (this.players.some(player => player.hands.some(hand => !hand.bust()))) {
+            dealer:
+            while (true) {
+                await this.displayEmbed(`Dealer to move...`, false);
+                const move = await this.dealerMove();
+                switch (move) {
+                case Move.HIT: {
+                    const card = this.dealer.hit();
+                    if (this.dealer.handSum.sum > PERFECT) {
+                        this.dealer.status = Status.BUST;
+                        this.prev = `Dealer draws \`${card}\` and **BUSTS**.`;
+                        break dealer;
+                    }
+                    this.prev = `Dealer draws \`${card}\`.`;
+                    break;
+                }
+                case Move.STAND: {
+                    this.dealer.status = Status.STAND;
+                    this.prev = `Dealer stands.`;
                     break dealer;
                 }
-                this.prev = `Dealer draws \`${card}\`.`;
-                break;
+                }
             }
-            case Move.STAND: {
-                this.dealer.status = Status.STAND;
-                this.prev = `Dealer stands.`;
-                break dealer;
-            }
-            }
+            this.resolveAll();
+        } else {
+            this.dealer.status = Status.WAIT;
         }
 
-        await this.displayResult(this.players[0].hands[0].compare(this.dealer));
+        await this.displayEmbed("Game end!", false);
     }
 }
 
-const channels = new Map<Discord.Snowflake, Set<Discord.Snowflake>>();
+const active = new Map<Discord.Snowflake, Set<Discord.Snowflake>>();
 
 export default new Command({
     name: "blackjack",
@@ -504,7 +580,9 @@ export default new Command({
     usage:
 ``,
     execute: async message => {
-        const playerUsers = [message.author, ...message.mentions.users.array()];
+        const playerUsers = message.mentions.users.has(message.author.id)
+            ? message.mentions.users.array()
+            : [message.author, ...message.mentions.users.array()];
 
         const botErrors: Array<BotError> = [];
         if (playerUsers.some(user => user.id === message.client.user!.id)) {
@@ -519,7 +597,7 @@ export default new Command({
         }
 
         const playerIds = playerUsers.map(user => user.id);
-        const currentIds = channels.get(message.channel.id) ?? new Set<Discord.Snowflake>();
+        const currentIds = active.get(message.channel.id) ?? new Set<Discord.Snowflake>();
         if (currentIds.size > 0 && playerIds.some(id => currentIds.has(id))) {
             const conflictIds = playerIds.filter(id => currentIds.has(id));
 
@@ -532,16 +610,17 @@ export default new Command({
             throw AggregateBotError.fromBotErrors(botErrors);
         }
 
-        channels.set(message.channel.id, new Set([...currentIds, ...playerIds]));
+        active.set(message.channel.id, new Set([...currentIds, ...playerIds]));
 
         const game = new Blackjack(message.channel, playerUsers);
         await game.runGame();
+        const endPlayerIds = game.getUserIds();
 
-        const ids = channels.get(message.channel.id)!;
-        if (playerIds.length === ids.size) {
-            channels.delete(message.channel.id);
+        const ids = active.get(message.channel.id)!;
+        if (endPlayerIds.length === ids.size) {
+            active.delete(message.channel.id);
         } else {
-            playerIds.forEach(id => ids.delete(id));
+            endPlayerIds.forEach(id => ids.delete(id));
         }
     },
 });
