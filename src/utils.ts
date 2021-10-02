@@ -1,3 +1,5 @@
+import assert from "assert/strict";
+
 import Discord from "discord.js";
 
 export function floorDiv(a: number, b: number): number {
@@ -22,6 +24,14 @@ export function range(a: number, b?: number): Array<number> {
     } else {
         return new Array(b-a).fill(undefined).map((_, i) => i+a);
     }
+}
+
+export function invertMap<K, V>(map: Map<K, V>): Map<V, K> {
+    return new Map(Array.from(map, ([k, v]) => [v, k]));
+}
+
+export function getAssert<K, V>(map: Map<K, V>, key: K): V {
+    return map.get(key) ?? assert.fail("missing");
 }
 
 export function trimNewlines(str: string): string {
