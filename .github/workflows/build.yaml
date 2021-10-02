@@ -3,11 +3,17 @@ name: Build
 on: [push]
 
 jobs:
-  build_and_test:
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
+      - name: Use example files
+        run: |
+          for s in $(find -regex ".*\.example\(\..*\)?")
+          do
+            mv $s $(sed s/.example// <<< $s)
+          done
       - name: npm install and build
         run: |
           npm install
@@ -16,4 +22,4 @@ jobs:
         uses: actions/upload-artifact@v2
         with:
           name: dist
-          path: dist/
+          path: ./dist/
