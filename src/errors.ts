@@ -25,7 +25,7 @@ export class AggregateBotError extends AggregateError {
         public botErrors: Array<BotError>,
     ) {
         super(botErrors, botErrors.map(botError => botError.message).join(", "));
-        this.name = "MultiBotError";
+        this.name = "AggregateBotError";
     }
 
     static fromBotErrors(botErrors: Array<BotError>): BotError | AggregateBotError {

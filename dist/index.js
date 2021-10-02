@@ -2,7 +2,7 @@ import fs from "fs";
 import { dirname } from "path";
 import { fileURLToPath } from "url";
 import assert from "assert/strict";
-import Discord, { DMChannel } from "discord.js";
+import Discord from "discord.js";
 import chalk from "chalk";
 import { BotError, AggregateBotError } from "./errors.js";
 import config from "./config/config.json";
@@ -40,7 +40,7 @@ async function runBot() {
     client.on("message", async (message) => {
         if (!message.content.startsWith(config.prefix) || message.author.bot)
             return;
-        if (message.channel instanceof DMChannel) {
+        if (message.channel instanceof Discord.DMChannel) {
             await message.channel.send("Sorry, I don't support DMs yet!");
             return;
         }

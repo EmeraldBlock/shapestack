@@ -1,6 +1,7 @@
 import Discord from "discord.js";
 import config from "./config/config.json";
 export class BotError extends Error {
+    description;
     constructor(message, description) {
         super(message);
         this.name = "BotError";
@@ -15,10 +16,11 @@ export class BotError extends Error {
     }
 }
 export class AggregateBotError extends AggregateError {
+    botErrors;
     constructor(botErrors) {
         super(botErrors, botErrors.map(botError => botError.message).join(", "));
         this.botErrors = botErrors;
-        this.name = "MultiBotError";
+        this.name = "AggregateBotError";
     }
     static fromBotErrors(botErrors) {
         if (botErrors.length === 1) {

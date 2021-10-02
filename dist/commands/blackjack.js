@@ -118,6 +118,9 @@ const statusToEmoji = [
     "🔒",
 ];
 class Card {
+    suit;
+    rank;
+    down;
     constructor(suit, rank, down = false) {
         this.suit = suit;
         this.rank = rank;
@@ -142,6 +145,8 @@ class Card {
     }
 }
 class HandSum {
+    sum;
+    soft;
     constructor(sum, soft) {
         this.sum = sum;
         this.soft = soft;
@@ -177,9 +182,11 @@ class HandSum {
     }
 }
 class Hand {
+    cards;
+    handSum;
+    status = Status.WAIT;
     constructor(cards) {
         this.cards = cards;
-        this.status = Status.WAIT;
         this.handSum = HandSum.fromCards(this.cards);
     }
     static deal() {
@@ -233,9 +240,9 @@ class Hand {
     }
 }
 class Dealer extends Hand {
+    hidden = true;
     constructor(cards) {
         super(cards);
-        this.hidden = true;
         this.status = Status.WAIT;
     }
     static() {
@@ -255,9 +262,10 @@ class Dealer extends Hand {
     }
 }
 class PlayerHand extends Hand {
+    bet = 100;
+    result;
     constructor(cards) {
         super(cards);
-        this.bet = 100;
     }
     resolve(hand) {
         return this.result ?? (this.result = this.compare(hand));
@@ -283,11 +291,14 @@ class PlayerHand extends Hand {
     }
 }
 class Player {
+    hands;
+    user;
+    channel;
+    quit = false;
     constructor(hands, user, channel) {
         this.hands = hands;
         this.user = user;
         this.channel = channel;
-        this.quit = false;
     }
     static deal(user, channel) {
         return new Player([PlayerHand.deal()], user, channel);
@@ -321,6 +332,13 @@ class Player {
     }
 }
 class Blackjack {
+    channel;
+    users;
+    players;
+    dealer;
+    embed;
+    prompt;
+    prev;
     constructor(channel, users) {
         this.channel = channel;
         this.users = users;
