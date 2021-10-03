@@ -12,7 +12,7 @@ jobs:
         run: |
           for s in $(find -regex ".*\.example\(\..*\)?")
           do
-            mv $s $(sed s/.example// <<< $s)
+            mv -v $s $(sed s/.example// <<< $s)
           done
       - name: npm install and build
         run: |
