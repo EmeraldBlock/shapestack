@@ -4,14 +4,14 @@
   "description": "A Discord bot core.",
   "license": "ISC",
   "author": "EmeraldBlock",
-  "main": "./dist/index.js",
+  "main": "./dist/js/index.js",
   "type": "module",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node --experimental-json-modules .",
     "dev": "npx nodemon",
     "lint": "npx eslint .",
-    "build": "npx rimraf ./dist/ && npx tsc"
+    "build": "node ./tools/clear-copy.js && npx tsc"
   },
   "dependencies": {
     "chalk": "^4.1.1",
@@ -24,7 +24,6 @@
     "eslint": "^7.26.0",
     "eslint-plugin-jsdoc": "^34.2.0",
     "nodemon": "^2.0.7",
-    "rimraf": "^3.0.2",
     "ts-node": "^9.1.1",
     "typescript": "^4.2.4"
   }
