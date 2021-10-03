@@ -1,7 +1,7 @@
 {
-  "name": "not-gambling-bot",
+  "name": "embot",
   "version": "0.0.2",
-  "description": "A Discord gambling bot without gambling.",
+  "description": "A Discord bot core.",
   "license": "ISC",
   "author": "EmeraldBlock",
   "main": "./dist/index.js",
