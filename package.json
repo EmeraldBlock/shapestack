@@ -1,16 +1,17 @@
 {
-  "name": "not-gambling-bot",
+  "name": "shapestack",
   "version": "0.0.2",
-  "description": "A Discord gambling bot without gambling.",
-  "license": "ISC",
+  "description": "A Discord bot with functions related to shapez.io.",
+  "license": "GPL-3.0-only",
   "author": "EmeraldBlock",
-  "main": "./dist/index.js",
+  "main": "./dist/js/index.js",
   "type": "module",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node --experimental-json-modules .",
     "dev": "npx nodemon",
-    "lint": "npx eslint ."
+    "lint": "npx eslint .",
+    "build": "node ./tools/clear-copy.js && npx tsc"
   },
   "dependencies": {
     "canvas": "^2.8.0",

@@ -1,0 +1,9 @@
+{
+    "prefix": "%",
+    "colors": {
+        "info": "#36c3eb",
+        "success": "#36eb84",
+        "warn": "#ebd036",
+        "error": "#eb4236"
+    }
+}
